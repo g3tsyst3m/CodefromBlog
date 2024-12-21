@@ -1,0 +1,37 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\robbi\\Documents\\GitHub\\CodefromBlog\\2024-12-20-Create your own C2 using Python - Part 3\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{8C4EF514-988D-4ED8-A44D-D376F300E35B}|UIAccess_bypassUAC\\UIAccess_bypassUAC.vcxproj|C:\\Users\\robbi\\Documents\\GitHub\\CodefromBlog\\2024-12-20-Create your own C2 using Python - Part 3\\UIAccess_bypassUAC\\UIAccess_bypassUAC.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{8C4EF514-988D-4ED8-A44D-D376F300E35B}|UIAccess_bypassUAC\\UIAccess_bypassUAC.vcxproj|solutionrelative:UIAccess_bypassUAC\\UIAccess_bypassUAC.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "UIAccess_bypassUAC.cpp",
+              "DocumentMoniker": "C:\\Users\\robbi\\Documents\\GitHub\\CodefromBlog\\2024-12-20-Create your own C2 using Python - Part 3\\UIAccess_bypassUAC\\UIAccess_bypassUAC.cpp",
+              "RelativeDocumentMoniker": "UIAccess_bypassUAC\\UIAccess_bypassUAC.cpp",
+              "ToolTip": "C:\\Users\\robbi\\Documents\\GitHub\\CodefromBlog\\2024-12-20-Create your own C2 using Python - Part 3\\UIAccess_bypassUAC\\UIAccess_bypassUAC.cpp",
+              "RelativeToolTip": "UIAccess_bypassUAC\\UIAccess_bypassUAC.cpp",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAHoAAABDAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
+              "WhenOpened": "2024-12-20T23:49:11.352Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
