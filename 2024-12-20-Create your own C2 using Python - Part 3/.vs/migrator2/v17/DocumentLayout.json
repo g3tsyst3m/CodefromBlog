@@ -1,0 +1,37 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Users\\robbi\\Documents\\GitHub\\CodefromBlog\\2024-12-20-Create your own C2 using Python - Part 3\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{B230569F-1967-4C23-A401-28A2993EEB4A}|migrator2\\migrator2.vcxproj|C:\\Users\\robbi\\Documents\\GitHub\\CodefromBlog\\2024-12-20-Create your own C2 using Python - Part 3\\migrator2\\migrator2.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}",
+      "RelativeMoniker": "D:0:0:{B230569F-1967-4C23-A401-28A2993EEB4A}|migrator2\\migrator2.vcxproj|solutionrelative:migrator2\\migrator2.cpp||{D0E1A5C6-B359-4E41-9B60-3365922C2A22}"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 0,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "migrator2.cpp",
+              "DocumentMoniker": "C:\\Users\\robbi\\Documents\\GitHub\\CodefromBlog\\2024-12-20-Create your own C2 using Python - Part 3\\migrator2\\migrator2.cpp",
+              "RelativeDocumentMoniker": "migrator2\\migrator2.cpp",
+              "ToolTip": "C:\\Users\\robbi\\Documents\\GitHub\\CodefromBlog\\2024-12-20-Create your own C2 using Python - Part 3\\migrator2\\migrator2.cpp",
+              "RelativeToolTip": "migrator2\\migrator2.cpp",
+              "ViewState": "AgIAAN4AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000677|",
+              "WhenOpened": "2024-12-20T22:09:18.156Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
