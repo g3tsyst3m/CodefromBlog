@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="LOTP_blog/LOTP_blog.vcxproj" Id="9c83ea6d-d234-48d6-86cc-c1243fbffa0f" />
+</Solution>
